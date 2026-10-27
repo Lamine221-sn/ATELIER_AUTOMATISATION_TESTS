@@ -5,71 +5,69 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      PA_USERNAME: ${{ secrets.PA_USERNAME }}
+      PA_TOKEN: ${{ secrets.PA_TOKEN }}
+      PA_TARGET_DIR: ${{ secrets.PA_TARGET_DIR }}
+      PA_WEBAPP_DOMAIN: ${{ secrets.PA_WEBAPP_DOMAIN }}
+      PA_HOST: ${{ secrets.PA_HOST }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate required secrets
         shell: bash
         run: |
           set -euo pipefail
-          : "${{ secrets.PA_USERNAME }}"
-          : "${{ secrets.PA_TOKEN }}"
-          : "${{ secrets.PA_TARGET_DIR }}"
-          : "${{ secrets.PA_WEBAPP_DOMAIN }}"
+          : "${PA_USERNAME:?secret PA_USERNAME manquant}"
+          : "${PA_TOKEN:?secret PA_TOKEN manquant}"
+          : "${PA_TARGET_DIR:?secret PA_TARGET_DIR manquant}"
+          : "${PA_WEBAPP_DOMAIN:?secret PA_WEBAPP_DOMAIN manquant}"
 
-      - name: Upload all files recursively (dirs auto-created by Files API)
+      - name: Upload all files recursively
         shell: bash
         run: |
           set -euo pipefail
-          USER="${{ secrets.PA_USERNAME }}"
-          TOKEN="${{ secrets.PA_TOKEN }}"
-          TARGET_DIR="${{ secrets.PA_TARGET_DIR }}"
-          DOMAIN="${{ secrets.PA_WEBAPP_DOMAIN }}"
-
-          # Optional: set PA_HOST secret to "eu.pythonanywhere.com" if your account is on EU.
-          HOST="${{ secrets.PA_HOST }}"
-          if [[ -z "${HOST}" ]]; then HOST="www.pythonanywhere.com"; fi
+          clean() { printf '%s' "$1" | tr -d '[:space:]'; }
+          USER="$(clean "$PA_USERNAME")"
+          TOKEN="$(clean "$PA_TOKEN")"
+          TARGET_DIR="$(clean "$PA_TARGET_DIR")"; TARGET_DIR="${TARGET_DIR%/}"
+          DOMAIN="$(clean "$PA_WEBAPP_DOMAIN")"
+          HOST="$(clean "${PA_HOST:-}")"; HOST="${HOST:-www.pythonanywhere.com}"
 
           echo "Using PythonAnywhere host: ${HOST}"
-          echo "Target directory: ${TARGET_DIR}"
 
-          # Upload every file; remote directories are created automatically by the Files API.
           while IFS= read -r -d '' file; do
             rel="${file#./}"
-
-            # Exclusions (adjust to taste)
             case "$rel" in
-              .git/*|.github/*|.venv/*|__pycache__/*|node_modules/*) continue ;;
+              .git/*|.github/*|.venv/*|__pycache__/*|*/__pycache__/*|node_modules/*) continue ;;
               *.pyc|.DS_Store) continue ;;
             esac
 
             remote_path="${TARGET_DIR}/${rel}"
-            echo " - ${rel} -> ${remote_path}"
+            echo " - ${rel}"
 
-            curl -sS --fail -X POST \
+            code=$(curl -sS -o /tmp/resp.txt -w '%{http_code}' -X POST \
               -H "Authorization: Token ${TOKEN}" \
               -F "content=@${file}" \
-              "https://${HOST}/api/v0/user/${USER}/files/path${remote_path}" \
-              >/dev/null
-
-          done < <(
-            find . \
-              -type d \( -name .git -o -name .github -o -name .venv -o -name __pycache__ -o -name node_modules \) -prune -false \
-              -o -type f \
-                ! -name ".DS_Store" \
-                ! -name "*.pyc" \
-                -print0
-          )
+              "https://${HOST}/api/v0/user/${USER}/files/path${remote_path}")
+            if [[ "$code" != 2* ]]; then
+              echo "ERREUR HTTP ${code} sur ${rel}"
+              cat /tmp/resp.txt; echo
+              exit 1
+            fi
+          done < <(find . -type f -not -path './.git/*' -not -path './.github/*' -print0)
 
           echo "Reloading webapp ${DOMAIN}..."
           curl -sS --fail -X POST \
             -H "Authorization: Token ${TOKEN}" \
-            "https://${HOST}/api/v0/user/${USER}/webapps/${DOMAIN}/reload/" \
-            >/dev/null
-
+            "https://${HOST}/api/v0/user/${USER}/webapps/${DOMAIN}/reload/" >/dev/null
           echo "Deployed. Try: https://${DOMAIN}/"
