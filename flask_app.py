@@ -1,3 +1,5 @@
+from routes_tests import bp as tests_bp
+   app.register_blueprint(tests_bp)
 from flask import Flask, render_template_string, render_template, jsonify, request, redirect, url_for, session
 from flask import render_template
 from flask import json
