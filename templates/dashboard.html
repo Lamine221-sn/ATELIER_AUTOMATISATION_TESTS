@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Dashboard — tests API {{ last.api if last else "" }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { max-width: 900px; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+        th, td { border-bottom: 1px solid #ccd; padding: 6px 8px; text-align: left; }
+        .PASS { color: #1a7f37; font-weight: bold; }
+        .FAIL, .ERROR { color: #c62828; font-weight: bold; }
+        .cards { display: flex; gap: 12px; flex-wrap: wrap; }
+        .card { background: #fff; border: 1px solid #ccd; border-radius: 8px; padding: 10px 16px; }
+        .card b { display: block; font-size: 1.4em; }
+        svg { background: #fff; border: 1px solid #ccd; border-radius: 8px; width: 100%; }
+    </style>
+</head>
+<body>
+    <nav><a href="/">Accueil</a> <a href="/dashboard">Dashboard</a> <a href="/health">Health</a>
+        <a href="/export.json">Export JSON</a></nav>
+    <h1>Dashboard — tests de l'API {{ last.api if last else "" }}</h1>
+
+    {% if not last %}
+        <p>Aucun run enregistré. Lancez-en un via <a href="/run">/run</a>.</p>
+    {% else %}
+        <h2>Dernier run</h2>
+        <p>{{ last.timestamp }} —
+           {% if last.summary.available %}<span class="PASS">API disponible</span>{% else %}<span class="FAIL">API indisponible</span>{% endif %}</p>
+        <div class="cards">
+            <div class="card">Réussis<b>{{ last.summary.passed }} / {{ last.summary.passed + last.summary.failed }}</b></div>
+            <div class="card">Taux d'échec des tests<b>{{ (last.summary.error_rate * 100) | round(1) }} %</b></div>
+            <div class="card">Erreurs HTTP (5xx/429/timeout)<b>{{ (last.summary.http_error_rate * 100) | round(1) }} %</b></div>
+            <div class="card">Latence moyenne<b>{{ last.summary.latency_ms_avg }} ms</b></div>
+            <div class="card">Latence p95<b>{{ last.summary.latency_ms_p95 }} ms</b></div>
+        </div>
+        <p><strong>Interprétation :</strong> {{ last.summary.verdict }}</p>
+
+        <table>
+            <tr><th>Test</th><th>Résultat</th><th>Latence</th><th>Détails</th></tr>
+            {% for t in last.tests %}
+            <tr><td>{{ t.name }}</td><td class="{{ t.status }}">{{ t.status }}</td>
+                <td>{{ t.latency_ms if t.latency_ms is not none else "—" }} ms</td><td>{{ t.details }}</td></tr>
+            {% endfor %}
+        </table>
+
+        {% if latency_trend %}
+        <h2>Tendance : latence p95</h2>
+        <svg viewBox="0 0 600 120" preserveAspectRatio="none"><polyline points="{{ latency_trend }}" fill="none" stroke="#3355cc" stroke-width="2"/></svg>
+        <h2>Tendance : taux d'échec</h2>
+        <svg viewBox="0 0 600 120" preserveAspectRatio="none"><polyline points="{{ error_trend }}" fill="none" stroke="#c62828" stroke-width="2"/></svg>
+        {% endif %}
+
+        <h2>Historique ({{ runs | length }} derniers runs)</h2>
+        <table>
+            <tr><th>Date</th><th>Réussis</th><th>Échec %</th><th>Moy.</th><th>p95</th><th>Dispo</th></tr>
+            {% for r in runs %}
+            <tr><td>{{ r.timestamp }}</td><td>{{ r.summary.passed }}/{{ r.summary.passed + r.summary.failed }}</td>
+                <td>{{ (r.summary.error_rate * 100) | round(1) }}</td>
+                <td>{{ r.summary.latency_ms_avg }} ms</td><td>{{ r.summary.latency_ms_p95 }} ms</td>
+                <td>{{ "oui" if r.summary.available else "non" }}</td></tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</body>
+</html>
